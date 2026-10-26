@@ -7,11 +7,12 @@
  *   TOKEN           必填，自己訂一組通關密語，手機 App 設定時填同一組
  *   FOLDER_NAME     選填，預設 voice-notes（放在「我的雲端硬碟」第一層）
  *   AUDIO_FOLDER_NAME 選填，預設 voice-notes-audio（原始錄音 .wav）
- *   GEMINI_MODEL    選填，預設 gemini-3.8-flash
+ *   GEMINI_MODEL    選填，預設 gemini-3.8-flash（忙線時自動改用 FALLBACK_MODELS）
  *   DICTIONARY      選填，常用專有名詞，逗號分隔；不填用下面的預設清單
  */
 
 const DEFAULT_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash'];
 const DEFAULT_FOLDER = 'voice-notes';
 const DEFAULT_AUDIO_FOLDER = 'voice-notes-audio';
 const DEFAULT_DICTIONARY = [
@@ -86,39 +87,54 @@ function buildNote(req, props) {
     parts.push({ text: '原始文字：\n' + req.text });
   }
 
-  const model = props.getProperty('GEMINI_MODEL') || DEFAULT_MODEL;
-  const res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent',
-    {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { 'x-goog-api-key': props.getProperty('GEMINI_API_KEY') },
-      muteHttpExceptions: true,
-      payload: JSON.stringify({
-        contents: [{ role: 'user', parts: parts }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              title: { type: 'STRING' },
-              cleaned: { type: 'STRING' },
-              transcript: { type: 'STRING' },
-              tags: { type: 'ARRAY', items: { type: 'STRING' } },
-            },
-            required: ['title', 'cleaned', 'transcript', 'tags'],
-          },
+  const payload = JSON.stringify({
+    contents: [{ role: 'user', parts: parts }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          title: { type: 'STRING' },
+          cleaned: { type: 'STRING' },
+          transcript: { type: 'STRING' },
+          tags: { type: 'ARRAY', items: { type: 'STRING' } },
         },
-      }),
-    }
-  );
+        required: ['title', 'cleaned', 'transcript', 'tags'],
+      },
+    },
+  });
 
-  const body = JSON.parse(res.getContentText());
-  if (res.getResponseCode() !== 200) {
-    throw new Error('Gemini 錯誤：' + (body.error && body.error.message || res.getResponseCode()));
+  // 模型忙線（429／5xx）時：同一模型稍等再試一次，還不行就換下一個備用模型
+  const models = [props.getProperty('GEMINI_MODEL') || DEFAULT_MODEL]
+    .concat(FALLBACK_MODELS)
+    .filter(function (m, i, all) { return all.indexOf(m) === i; });
+  let lastError = '';
+  for (let i = 0; i < models.length; i++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = UrlFetchApp.fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/' + models[i] + ':generateContent',
+        {
+          method: 'post',
+          contentType: 'application/json',
+          headers: { 'x-goog-api-key': props.getProperty('GEMINI_API_KEY') },
+          muteHttpExceptions: true,
+          payload: payload,
+        }
+      );
+      const code = res.getResponseCode();
+      const body = JSON.parse(res.getContentText());
+      if (code === 200) {
+        const text = body.candidates[0].content.parts.map(function (p) { return p.text || ''; }).join('');
+        const note = JSON.parse(text);
+        note.model = models[i];
+        return note;
+      }
+      lastError = models[i] + '：' + (body.error && body.error.message || code);
+      if (code !== 429 && code < 500) throw new Error('Gemini 錯誤：' + lastError);
+      if (attempt === 0) Utilities.sleep(2000);
+    }
   }
-  const text = body.candidates[0].content.parts.map(function (p) { return p.text || ''; }).join('');
-  return JSON.parse(text);
+  throw new Error('Gemini 暫時都忙線，稍後重試（' + lastError + '）');
 }
 
 // ---------- 檔案 ----------
@@ -147,6 +163,7 @@ function renderMarkdown(req, note) {
   ];
   if (req.seconds) lines.push('duration_sec: ' + req.seconds);
   if (note.audioUrl) lines.push('audio: ' + note.audioUrl);
+  if (note.model) lines.push('model: ' + note.model);
   lines.push('tags: [' + tags.join(', ') + ']', 'status: inbox', '---', '', '# ' + note.title, '');
   if (note.audioUrl) lines.push('🎧 [原始錄音](' + note.audioUrl + ')', '');
   lines.push(note.cleaned.trim(), '');
