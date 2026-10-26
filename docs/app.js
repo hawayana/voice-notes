@@ -159,49 +159,106 @@ async function renderQueueInfo() {
   const el = $('queueInfo');
   el.replaceChildren();
   if (!items.length) return;
-  el.append(`📮 還有 ${items.length} 則等待上傳`);
-  const btn = document.createElement('button');
-  btn.textContent = '重試';
-  btn.onclick = flushQueue;
-  el.append(btn);
+  items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  const head = document.createElement('div');
+  head.append(`📮 還有 ${items.length} 則等待上傳`);
+  const retry = document.createElement('button');
+  retry.textContent = '全部重試';
+  retry.onclick = flushQueue;
+  head.append(retry);
+  el.append(head);
+
+  // 逐則列出：哪一則卡住、為什麼卡住，必要時可以單獨刪掉
+  const ul = document.createElement('ul');
+  ul.className = 'list pending';
+  for (const item of items) {
+    const li = document.createElement('li');
+    const label = item.type === 'audio' ? `🎙️ 錄音 ${item.seconds || '?'} 秒` : `⌨️ ${item.text.slice(0, 12)}…`;
+    li.append(`${item.createdAt.slice(5, 16).replace('T', ' ')} · ${label}`);
+    const del = document.createElement('button');
+    del.textContent = '刪除';
+    del.onclick = async () => {
+      if (!confirm('確定刪除這則還沒上傳的筆記？刪掉就找不回來了。')) return;
+      await queueDelete(item.id);
+      renderQueueInfo();
+    };
+    li.append(del);
+    if (item.lastError) {
+      const m = document.createElement('div');
+      m.className = 'meta';
+      m.textContent = '上次失敗：' + item.lastError;
+      li.append(m);
+    }
+    ul.append(li);
+  }
+  el.append(ul);
 }
 
 // ---------- 上傳 ----------
+const UPLOAD_TIMEOUT_MS = 150000;
+
 async function post(url, payload) {
   // 不設 Content-Type → 瀏覽器用 text/plain，屬於 simple request，Apps Script 不需處理 CORS preflight
-  const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload), redirect: 'follow' });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  // 加逾時：連線卡住時不會一直佔著上傳流程，讓「重試」按了沒反應
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload), redirect: 'follow', signal: ctrl.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('等太久沒回應');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 let flushing = false;
 async function flushQueue() {
-  if (flushing) return;
+  if (flushing) {
+    setStatus('⏳ 正在上傳中，請稍候…');
+    return;
+  }
   if (!config.url || !config.token) {
     setStatus('請先按右上角 ⚙️ 完成設定', 'err');
     openSettings(true);
     return;
   }
   flushing = true;
+  let failed = 0;
   try {
     const items = (await queueAll()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    for (const item of items) {
-      setStatus(item.type === 'audio' ? '🧠 AI 轉文字整理中…' : '💾 存檔中…');
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const n = items.length > 1 ? `（${i + 1}/${items.length}）` : '';
+      setStatus((item.type === 'audio' ? '🧠 AI 轉文字整理中…' : '💾 存檔中…') + n);
       try {
         const res = await post(config.url, { ...item, action: 'save', token: config.token, device: config.device || guessDevice() });
-        if (!res.ok) throw new Error(res.error || '未知錯誤');
+        if (!res.ok) {
+          // 後端有回應但處理失敗（例如 Gemini 忙線）：記下原因，繼續處理下一則，不讓一則卡住全部
+          item.lastError = res.error || '未知錯誤';
+          await queuePut(item);
+          failed++;
+          continue;
+        }
         await queueDelete(item.id);
         addHistory({ title: res.title, filename: res.filename, when: item.createdAt.slice(0, 16).replace('T', ' ') });
         showResult(res);
         setStatus(`✅ 已存檔：${res.filename}`, 'ok');
       } catch (e) {
+        // 網路斷線或逾時：後面幾則也一定失敗，先停下來
+        item.lastError = e.message;
+        await queuePut(item);
         setStatus(`⚠️ 先存在手機裡，稍後重送（${e.message}）`, 'err');
-        break;
+        return;
       }
     }
+    if (failed) setStatus(`⚠️ 有 ${failed} 則沒成功，原因列在下面，可以按「全部重試」`, 'err');
   } finally {
     flushing = false;
-    renderQueueInfo();
+    await renderQueueInfo();
   }
 }
 window.addEventListener('online', flushQueue);
