@@ -1,20 +1,19 @@
 # 💡 語音速記
 
-手機／iPad／Mac 打開就能講，AI（Gemini）轉文字並整理，存成 `.md`，最後自動進到
-`hawayana-agent/100_Todo/voice-notes/`。
+手機／iPad／Mac 打開就能講，AI（Gemini）轉文字並整理，存成 `.md`，全部留在 Google Drive。
 
 ```
 手機 App（GitHub Pages 上的 PWA）
   │ 錄音 16 kHz WAV／或打字（網路斷了先存在手機，之後自動重送）
   ▼
 Google Apps Script（apps-script/Code.gs）
-  │ Gemini 轉文字＋整理 → 寫 .md 到 Google Drive「voice-notes」，錄音 .wav 存「voice-notes-audio」
+  │ Gemini 轉文字＋整理
   ▼
-Mac launchd 每 5 分鐘（mac/voice_notes_mover.sh）
-  │ rclone：gdrive:voice-notes → onedrive:hawayana-agent/100_Todo/voice-notes
-  ▼
-OneDrive 同步到 Mac → hawayana-agent 收件匣
+Google Drive：筆記 .md →「voice-notes」，錄音 .wav →「voice-notes-audio」
 ```
+
+筆記刻意不自動進 hawayana-agent vault（2026-10-26 決定）：需要時請 Claude 從 Drive 讀出來轉過去。
+`mac/voice_notes_mover.sh` 是當初的自動搬檔腳本，已停用，留著備用。
 
 ## 檔案
 
@@ -22,7 +21,7 @@ OneDrive 同步到 Mac → hawayana-agent 收件匣
 | --- | --- |
 | `docs/` | 前端 PWA（GitHub Pages 從這裡發布） |
 | `apps-script/Code.gs` | 後端，貼到 script.google.com |
-| `mac/voice_notes_mover.sh` | Drive → OneDrive 搬檔；由 `~/Library/LaunchAgents/com.hawayana.voice-notes-mover.plist` 每 5 分鐘執行 |
+| `mac/voice_notes_mover.sh` | （已停用）Drive → OneDrive vault 搬檔，用 rclone；要重新啟用需建 launchd plist 並換成自己的 Google client_id |
 
 ## 一次性設定
 
@@ -52,14 +51,7 @@ OneDrive 同步到 Mac → hawayana-agent 收件匣
 
 repo 公開的只有程式碼；Apps Script 網址和 TOKEN 只存在各裝置的瀏覽器裡。
 
-### 4. 讓 Mac 能從 Google Drive 搬檔
-在終端機執行一次（會開瀏覽器登入 Google）：
-
-```bash
-/opt/homebrew/bin/rclone config create gdrive drive scope=drive
-```
-
-### 5. 每台裝置
+### 4. 每台裝置
 1. 打開 `https://hawayana.github.io/voice-notes/`
 2. ⚙️ 填 Apps Script 網址、TOKEN、裝置名稱 → 測試連線 → 儲存
 3. 加到主畫面
@@ -93,7 +85,6 @@ status: inbox
 ```
 
 ## 疑難排解
-- 搬檔紀錄：`~/Library/Logs/voice_notes_mover.log`
 - 手機顯示「📮 還有 N 則等待上傳」：按「重試」，或下次打開 App 會自動重送
 - 想改專有名詞字典：Apps Script 指令碼屬性加 `DICTIONARY`（逗號分隔）
 - 想換模型：指令碼屬性加 `GEMINI_MODEL`
