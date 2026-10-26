@@ -6,12 +6,14 @@
  *   GEMINI_API_KEY  必填，Google AI Studio 申請
  *   TOKEN           必填，自己訂一組通關密語，手機 App 設定時填同一組
  *   FOLDER_NAME     選填，預設 voice-notes（放在「我的雲端硬碟」第一層）
+ *   AUDIO_FOLDER_NAME 選填，預設 voice-notes-audio（原始錄音 .wav）
  *   GEMINI_MODEL    選填，預設 gemini-3.8-flash
  *   DICTIONARY      選填，常用專有名詞，逗號分隔；不填用下面的預設清單
  */
 
 const DEFAULT_MODEL = 'gemini-3.8-flash';
 const DEFAULT_FOLDER = 'voice-notes';
+const DEFAULT_AUDIO_FOLDER = 'voice-notes-audio';
 const DEFAULT_DICTIONARY = [
   'DDR1', 'Discoidin Domain Receptor 1', 'IDD', 'intervertebral disc degeneration',
   'NP cell', 'nucleus pulposus', 'annulus fibrosus', 'GLP-1', 'exosome', 'MSC', 'iPSC',
@@ -40,6 +42,14 @@ function doPost(e) {
 
     const note = buildNote(req, props);
     const filename = makeFilename(req.createdAt, note.title);
+
+    // 錄音存到另一個資料夾（Mac 搬檔只搬 .md，錄音留在 Drive），筆記裡放連結
+    if (req.type === 'audio') {
+      const audioFolder = getFolder(props.getProperty('AUDIO_FOLDER_NAME') || DEFAULT_AUDIO_FOLDER);
+      const blob = Utilities.newBlob(Utilities.base64Decode(req.audio), req.mime || 'audio/wav', filename.replace(/\.md$/, '.wav'));
+      note.audioUrl = audioFolder.createFile(blob).getUrl();
+    }
+
     getFolder(folderName).createFile(filename, renderMarkdown(req, note), 'text/markdown');
 
     const result = { ok: true, filename: filename, title: note.title, cleaned: note.cleaned };
@@ -136,7 +146,10 @@ function renderMarkdown(req, note) {
     'source: ' + (req.type === 'audio' ? 'voice' : 'text'),
   ];
   if (req.seconds) lines.push('duration_sec: ' + req.seconds);
-  lines.push('tags: [' + tags.join(', ') + ']', 'status: inbox', '---', '', '# ' + note.title, '', note.cleaned.trim(), '');
+  if (note.audioUrl) lines.push('audio: ' + note.audioUrl);
+  lines.push('tags: [' + tags.join(', ') + ']', 'status: inbox', '---', '', '# ' + note.title, '');
+  if (note.audioUrl) lines.push('🎧 [原始錄音](' + note.audioUrl + ')', '');
+  lines.push(note.cleaned.trim(), '');
   if (note.transcript && note.transcript.trim() && note.transcript.trim() !== note.cleaned.trim()) {
     lines.push('## 原始逐字稿', '', note.transcript.trim(), '');
   }

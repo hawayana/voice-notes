@@ -8,7 +8,7 @@
   │ 錄音 16 kHz WAV／或打字（網路斷了先存在手機，之後自動重送）
   ▼
 Google Apps Script（apps-script/Code.gs）
-  │ Gemini 轉文字＋整理 → 寫 .md 到 Google Drive「voice-notes」
+  │ Gemini 轉文字＋整理 → 寫 .md 到 Google Drive「voice-notes」，錄音 .wav 存「voice-notes-audio」
   ▼
 Mac launchd 每 5 分鐘（mac/voice_notes_mover.sh）
   │ rclone：gdrive:voice-notes → onedrive:hawayana-agent/100_Todo/voice-notes
@@ -76,11 +76,14 @@ created: 2026-10-25T14:32:05-04:00
 device: Galaxy S25
 source: voice
 duration_sec: 42
+audio: https://drive.google.com/file/d/…
 tags: [DDR1, 實驗想法]
 status: inbox
 ---
 
 # DDR1 抑制劑用在 NP cell
+
+🎧 [原始錄音](https://drive.google.com/file/d/…)
 
 （AI 整理後的內容）
 
