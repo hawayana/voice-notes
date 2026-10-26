@@ -40,6 +40,6 @@
 - **Mac 的 `rm` 是 `trash` 的 alias**；Drive 裡 Apps Script 建的檔案本機刪不掉 → 用 Google Drive 連接器 `trash_file`
 
 ## 待辦／注意
-- [ ] 確認 Apps Script 已部署含 `LockService` 的版本（防重複）
+- [x] Apps Script 已部署含 `LockService` 的版本（防重複，2026-10-26 使用者確認）
 - [ ] iPad 安裝（Safari → 分享 → 加入主畫面）
 - rclone 的 `gdrive:` 遠端是用 rclone 共用 client_id 建的，2026 年內會失效；目前沒用到（自動搬檔已停用），要重新啟用搬檔時需先建自己的 Google OAuth client_id（https://rclone.org/drive/#making-your-own-client-id）
