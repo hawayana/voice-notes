@@ -216,6 +216,8 @@ async function post(url, payload) {
 }
 
 let flushing = false;
+let recheckTimer = null;
+
 async function flushQueue() {
   if (flushing) {
     setStatus('⏳ 正在上傳中，請稍候…');
@@ -226,8 +228,20 @@ async function flushQueue() {
     openSettings(true);
     return;
   }
+  // 同時開著瀏覽器分頁和主畫面 App 時，只讓一個視窗上傳，避免同一則被送好幾次
+  if (navigator.locks) {
+    return navigator.locks.request('vn-flush', { ifAvailable: true }, (lock) => {
+      if (!lock) return setStatus('⏳ 另一個視窗正在上傳，請稍候…');
+      return flushQueueLocked();
+    });
+  }
+  return flushQueueLocked();
+}
+
+async function flushQueueLocked() {
   flushing = true;
   let failed = 0;
+  let processing = 0;
   try {
     const items = (await queueAll()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (let i = 0; i < items.length; i++) {
@@ -236,6 +250,11 @@ async function flushQueue() {
       setStatus((item.type === 'audio' ? '🧠 AI 轉文字整理中…' : '💾 存檔中…') + n);
       try {
         const res = await post(config.url, { ...item, action: 'save', token: config.token, device: config.device || guessDevice() });
+        if (res.processing) {
+          // 後端還在處理同一則（上一次的請求還沒做完）：不算失敗，稍後再問一次結果
+          processing++;
+          continue;
+        }
         if (!res.ok) {
           // 後端有回應但處理失敗（例如 Gemini 忙線）：記下原因，繼續處理下一則，不讓一則卡住全部
           item.lastError = res.error || '未知錯誤';
@@ -256,12 +275,21 @@ async function flushQueue() {
       }
     }
     if (failed) setStatus(`⚠️ 有 ${failed} 則沒成功，原因列在下面，可以按「全部重試」`, 'err');
+    else if (processing) setStatus('🧠 AI 還在處理中，30 秒後自動確認…');
+    if (processing) {
+      clearTimeout(recheckTimer);
+      recheckTimer = setTimeout(flushQueue, 30000);
+    }
   } finally {
     flushing = false;
     await renderQueueInfo();
   }
 }
 window.addEventListener('online', flushQueue);
+// 從背景切回 App 時（例如剛去 Drive 看過檔案），補送還沒確認的筆記
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && config.url) flushQueue();
+});
 
 // ---------- 文字模式 ----------
 $('saveTextBtn').onclick = async () => {

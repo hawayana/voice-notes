@@ -36,29 +36,47 @@ function doPost(e) {
     if (req.action === 'ping') return json({ ok: true, folder: folderName });
     if (req.action !== 'save') return json({ ok: false, error: '未知的動作' });
 
-    // 同一則筆記重送時（例如上次存好了但回應沒傳回手機），直接回傳先前的結果，避免重複檔案
+    // 同一則筆記重送時避免重複檔案：
+    //   已經存好（回應沒傳回手機）→ 直接回傳先前的結果
+    //   還在處理中（手機等不及又送一次，或開了兩個視窗）→ 告訴手機「處理中」，不重做
+    // 用鎖確保兩個同時到達的請求不會都以為自己是第一個
     const cache = CacheService.getScriptCache();
-    const done = cache.get('done_' + req.id);
-    if (done) return json(JSON.parse(done));
-
-    const note = buildNote(req, props);
-    const filename = makeFilename(req.createdAt, note.title);
-
-    // 錄音存到另一個資料夾（Mac 搬檔只搬 .md，錄音留在 Drive），筆記裡放連結
-    if (req.type === 'audio') {
-      const audioFolder = getFolder(props.getProperty('AUDIO_FOLDER_NAME') || DEFAULT_AUDIO_FOLDER);
-      const blob = Utilities.newBlob(Utilities.base64Decode(req.audio), req.mime || 'audio/wav', filename.replace(/\.md$/, '.wav'));
-      note.audioUrl = audioFolder.createFile(blob).getUrl();
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try {
+      const done = cache.get('done_' + req.id);
+      if (done) return json(JSON.parse(done));
+      if (cache.get('processing_' + req.id)) return json({ ok: false, processing: true, error: '後端還在處理這則' });
+      cache.put('processing_' + req.id, '1', 600);
+    } finally {
+      lock.releaseLock();
     }
 
-    getFolder(folderName).createFile(filename, renderMarkdown(req, note), 'text/markdown');
-
-    const result = { ok: true, filename: filename, title: note.title, cleaned: note.cleaned };
-    cache.put('done_' + req.id, JSON.stringify(result), 21600);
-    return json(result);
+    try {
+      const result = saveNote(req, props, folderName);
+      cache.put('done_' + req.id, JSON.stringify(result), 21600);
+      return json(result);
+    } finally {
+      cache.remove('processing_' + req.id);
+    }
   } catch (err) {
     return json({ ok: false, error: String(err && err.message || err) });
   }
+}
+
+function saveNote(req, props, folderName) {
+  const note = buildNote(req, props);
+  const filename = makeFilename(req.createdAt, note.title);
+
+  // 錄音存到另一個資料夾（Mac 搬檔只搬 .md，錄音留在 Drive），筆記裡放連結
+  if (req.type === 'audio') {
+    const audioFolder = getFolder(props.getProperty('AUDIO_FOLDER_NAME') || DEFAULT_AUDIO_FOLDER);
+    const blob = Utilities.newBlob(Utilities.base64Decode(req.audio), req.mime || 'audio/wav', filename.replace(/\.md$/, '.wav'));
+    note.audioUrl = audioFolder.createFile(blob).getUrl();
+  }
+
+  getFolder(folderName).createFile(filename, renderMarkdown(req, note), 'text/markdown');
+  return { ok: true, filename: filename, title: note.title, cleaned: note.cleaned };
 }
 
 // ---------- Gemini ----------
