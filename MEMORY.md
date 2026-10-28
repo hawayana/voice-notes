@@ -27,11 +27,12 @@
 - **手機先存 IndexedDB 再上傳**：沒網路或失敗時想法不會丟，下次開 App 自動補送
 - **POST 不設 Content-Type**：讓瀏覽器用 text/plain，避開 Apps Script 不支援的 CORS preflight
 - **用 TOKEN 保護**：網址設「所有人」才能從手機直接呼叫，所以靠 TOKEN 擋陌生請求
-- **Gemini 主力 `gemini-3.8-flash`，忙線改用 3.6 Flash → 2.5 Flash**：轉錄＋整理用 Flash 就夠，Pro 慢又容易碰額度；準確度主要靠 `DICTIONARY`
+- **Gemini 主力 `gemini-3.8-flash`，忙線依序改用 3.6 Flash → 3.5 Flash-Lite → 3.1 Flash-Lite**（2026-10-28 拿掉 2.5 Flash：已不開放新用戶）：轉錄＋整理用 Flash 就夠，Pro 慢又容易碰額度；準確度主要靠 `DICTIONARY`
 - **筆記只留在 Drive，不自動進 vault（方案 B，使用者 2026-10-26 決定）**：不想所有東西都跟 vault 混在一起；需要時請 Claude 從 Drive 讀出來轉過去，或之後在 Drive 另開 vault
 
 ## 踩過的坑
 - **Gemini 忙線（high demand）** → 後端加了重試與備用模型
+- **備用模型被 Google 下架（2026-10-28）**：3.8、3.6 都忙線時退到 2.5 Flash，回「no longer available to new users」，整則失敗 → 換成現行模型，且某個模型不能用時改為跳下一個，不再整則中止；錯誤訊息會列出每個模型的狀況。**備用清單要定期對照 [Gemini 模型列表](https://ai.google.dev/gemini-api/docs/models)**
 - **同一則被處理 7 次、產生重複檔**：手機沒收到回應（App 切到背景、或瀏覽器分頁＋主畫面 App 兩個視窗同時送）就重送 → 後端加 LockService＋「處理中」標記，前端用 `navigator.locks` 讓多視窗只有一個上傳，收到 processing 30 秒後再確認
 - **「重試」按了沒反應**：上一次上傳還沒結束時被靜默忽略 → 改成顯示提示、加 150 秒逾時、單則失敗不擋其他、可逐則刪除
 - **指令碼屬性填反**：曾把 key 填在「屬性」欄 → 左邊是名稱（`TOKEN`），右邊才是值

@@ -12,7 +12,8 @@
  */
 
 const DEFAULT_MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash'];
+// 備用模型要選「新用戶還能用」的；gemini-2.5-flash 已不開放新用戶（2026-10-28 實際碰到）
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const DEFAULT_FOLDER = 'voice-notes';
 const DEFAULT_AUDIO_FOLDER = 'voice-notes-audio';
 const DEFAULT_DICTIONARY = [
@@ -126,7 +127,7 @@ function buildNote(req, props) {
   const models = [props.getProperty('GEMINI_MODEL') || DEFAULT_MODEL]
     .concat(FALLBACK_MODELS)
     .filter(function (m, i, all) { return all.indexOf(m) === i; });
-  let lastError = '';
+  const errors = [];
   for (let i = 0; i < models.length; i++) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = UrlFetchApp.fetch(
@@ -147,12 +148,20 @@ function buildNote(req, props) {
         note.model = models[i];
         return note;
       }
-      lastError = models[i] + '：' + (body.error && body.error.message || code);
-      if (code !== 429 && code < 500) throw new Error('Gemini 錯誤：' + lastError);
-      if (attempt === 0) Utilities.sleep(2000);
+      const message = body.error && body.error.message || String(code);
+      // key 錯了換哪個模型都沒用，直接回報
+      if (code === 401 || code === 403 || /API key/i.test(message)) throw new Error('Gemini 錯誤：' + message);
+      // 忙線（429／5xx）同一模型等一下再試一次；其他錯誤（例如模型已下架）直接換下一個
+      const busy = code === 429 || code >= 500;
+      if (busy && attempt === 0) {
+        Utilities.sleep(2000);
+        continue;
+      }
+      errors.push(models[i] + ' ' + code + (busy ? ' 忙線' : '：' + message.slice(0, 80)));
+      break;
     }
   }
-  throw new Error('Gemini 暫時都忙線，稍後重試（' + lastError + '）');
+  throw new Error('Gemini 暫時都不能用，稍後重試（' + errors.join('；') + '）');
 }
 
 // ---------- 檔案 ----------
