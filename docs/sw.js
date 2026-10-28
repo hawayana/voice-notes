@@ -1,6 +1,6 @@
 // 離線外殼：App 畫面離線也能打開；錄音先存在 IndexedDB，等有網路再上傳
 // 改版時把 VERSION 加一，舊快取會被清掉
-const VERSION = 'vn-v3';
+const VERSION = 'vn-v4';
 const FILES = ['./', 'index.html', 'app.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

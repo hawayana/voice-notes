@@ -228,14 +228,30 @@ async function flushQueue() {
     openSettings(true);
     return;
   }
+  // 沒有要傳的就不用搶上傳權，也不顯示任何提示
+  let pending = [];
+  try { pending = await queueAll(); } catch {}
+  if (!pending.length) return renderQueueInfo();
+
   // 同時開著瀏覽器分頁和主畫面 App 時，只讓一個視窗上傳，避免同一則被送好幾次
   if (navigator.locks) {
     return navigator.locks.request('vn-flush', { ifAvailable: true }, (lock) => {
-      if (!lock) return setStatus('⏳ 另一個視窗正在上傳，請稍候…');
+      if (!lock) return waitForOtherWindow();
       return flushQueueLocked();
     });
   }
   return flushQueueLocked();
+}
+
+// 另一個視窗正在上傳：等它傳完，再更新這個視窗的畫面，不留下過期的提示
+async function waitForOtherWindow() {
+  setStatus('⏳ 另一個視窗正在上傳，請稍候…');
+  await navigator.locks.request('vn-flush', () => {});
+  renderHistory();
+  await renderQueueInfo();
+  let left = [];
+  try { left = await queueAll(); } catch {}
+  setStatus(left.length ? '' : '✅ 另一個視窗已經上傳完成', left.length ? '' : 'ok');
 }
 
 async function flushQueueLocked() {
