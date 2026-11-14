@@ -196,23 +196,47 @@ async function renderQueueInfo() {
 }
 
 // ---------- 上傳 ----------
-const UPLOAD_TIMEOUT_MS = 150000;
+// 逾時依檔案大小放寬：5 分鐘錄音約 12 MB，手機網路慢時 150 秒傳不完，會一直從頭重傳
+const MIN_TIMEOUT_MS = 150000;
+const MAX_TIMEOUT_MS = 480000;
+const ASSUMED_BYTES_PER_SEC = 40000; // 假設最慢約 320 kbps，外加 60 秒給後端處理
+function timeoutFor(bytes) {
+  return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, 60000 + (bytes / ASSUMED_BYTES_PER_SEC) * 1000));
+}
 
-async function post(url, payload) {
+async function post(url, payload, opts = {}) {
   // 不設 Content-Type → 瀏覽器用 text/plain，屬於 simple request，Apps Script 不需處理 CORS preflight
-  // 加逾時：連線卡住時不會一直佔著上傳流程，讓「重試」按了沒反應
+  // （不能改用 XMLHttpRequest 取上傳進度：註冊 upload 監聽會讓瀏覽器改送 preflight，Apps Script 不支援）
+  const body = JSON.stringify(payload);
+  const ms = opts.timeoutMs || timeoutFor(body.length);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload), redirect: 'follow', signal: ctrl.signal });
+    const res = await fetch(url, { method: 'POST', body, redirect: 'follow', signal: ctrl.signal });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
+    try {
+      return await res.json();
+    } catch {
+      throw new Error('後端回傳的格式不對（檔案太大或後端出錯）');
+    }
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('等太久沒回應');
+    if (e.name === 'AbortError') throw new Error(`等太久沒回應（${Math.round(ms / 1000)} 秒）`);
+    if (e instanceof TypeError) throw new Error('網路中斷或連不上後端（' + e.message + '）');
     throw e;
   } finally {
     clearTimeout(timer);
   }
+}
+
+// 問後端這一則的狀態（只送 id，幾百 bytes）。回傳存好的結果、「處理中」，或 null（不知道，照原本流程重傳）
+// 舊版後端不認得 status 動作時會回錯誤，同樣落到 null，所以前端先更新也不會壞
+async function askStatus(item) {
+  try {
+    const st = await post(config.url, { action: 'status', id: item.id, token: config.token }, { timeoutMs: 30000 });
+    if (st.ok && st.state === 'done') return st.result;
+    if (st.ok && st.state === 'processing') return { ok: false, processing: true };
+  } catch {}
+  return null;
 }
 
 let flushing = false;
@@ -259,13 +283,25 @@ async function flushQueueLocked() {
   let failed = 0;
   let processing = 0;
   try {
-    const items = (await queueAll()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // 小的先傳：一則大錄音卡住（逾時、網路差）時，不會把後面的短筆記一起擋住
+    const size = (x) => (x.audio ? x.audio.length : (x.text || '').length);
+    const items = (await queueAll()).sort((a, b) => size(a) - size(b) || a.createdAt.localeCompare(b.createdAt));
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const n = items.length > 1 ? `（${i + 1}/${items.length}）` : '';
-      setStatus((item.type === 'audio' ? '🧠 AI 轉文字整理中…' : '💾 存檔中…') + n);
+      const mb = (size(item) / 1048576).toFixed(1);
+      const working = '💾 存檔中…' + n;
       try {
-        const res = await post(config.url, { ...item, action: 'save', token: config.token, device: config.device || guessDevice() });
+        // 上次失敗過（常見：後端其實已存好，只是回應沒傳回手機）→ 先用小請求問後端，不要整包重傳
+        let res = null;
+        if (item.lastError) {
+          setStatus(`🔎 確認後端是否已存好…${n}`);
+          res = await askStatus(item);
+        }
+        if (!res) {
+          setStatus(item.type === 'audio' ? `📤 上傳並整理中（${mb} MB，長錄音要 1～3 分鐘，請不要關掉）${n}` : working);
+          res = await post(config.url, { ...item, action: 'save', token: config.token, device: config.device || guessDevice() });
+        }
         if (res.processing) {
           // 後端還在處理同一則（上一次的請求還沒做完）：不算失敗，稍後再問一次結果
           processing++;
@@ -283,11 +319,11 @@ async function flushQueueLocked() {
         showResult(res);
         setStatus(`✅ 已存檔：${res.filename}`, 'ok');
       } catch (e) {
-        // 網路斷線或逾時：後面幾則也一定失敗，先停下來
+        // 網路錯誤或逾時：記下原因。真的離線才停下來；只是這一則太大逾時的話，繼續傳下一則
         item.lastError = e.message;
         await queuePut(item);
-        setStatus(`⚠️ 先存在手機裡，稍後重送（${e.message}）`, 'err');
-        return;
+        failed++;
+        if (!navigator.onLine) break;
       }
     }
     if (failed) setStatus(`⚠️ 有 ${failed} 則沒成功，原因列在下面，可以按「全部重試」`, 'err');

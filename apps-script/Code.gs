@@ -35,6 +35,14 @@ function doPost(e) {
     }
     const folderName = props.getProperty('FOLDER_NAME') || DEFAULT_FOLDER;
     if (req.action === 'ping') return json({ ok: true, folder: folderName });
+    // 手機上傳後沒收到回應時，用這個小請求問「這則存好了嗎」，不必整包錄音重傳
+    if (req.action === 'status') {
+      const c = CacheService.getScriptCache();
+      const doneJson = c.get('done_' + req.id);
+      if (doneJson) return json({ ok: true, state: 'done', result: JSON.parse(doneJson) });
+      if (c.get('processing_' + req.id)) return json({ ok: true, state: 'processing' });
+      return json({ ok: true, state: 'unknown' });
+    }
     if (req.action !== 'save') return json({ ok: false, error: '未知的動作' });
 
     // 同一則筆記重送時避免重複檔案：

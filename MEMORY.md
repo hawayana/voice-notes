@@ -35,12 +35,15 @@
 - **備用模型被 Google 下架（2026-10-28）**：3.8、3.6 都忙線時退到 2.5 Flash，回「no longer available to new users」，整則失敗 → 換成現行模型，且某個模型不能用時改為跳下一個，不再整則中止；錯誤訊息會列出每個模型的狀況。**備用清單要定期對照 [Gemini 模型列表](https://ai.google.dev/gemini-api/docs/models)**
 - **同一則被處理 7 次、產生重複檔**：手機沒收到回應（App 切到背景、或瀏覽器分頁＋主畫面 App 兩個視窗同時送）就重送 → 後端加 LockService＋「處理中」標記，前端用 `navigator.locks` 讓多視窗只有一個上傳，收到 processing 30 秒後再確認
 - **「重試」按了沒反應**：上一次上傳還沒結束時被靜默忽略 → 改成顯示提示、加 150 秒逾時、單則失敗不擋其他、可逐則刪除
+- **長錄音（約 5 分鐘、12 MB）一直上傳失敗，手機顯示「Failed to fetch」（2026-11-14）**：Drive 時間戳顯示後端其實早就存好了，是回應沒傳回手機（長時間等待時連線被切斷，例如切到背景），前端就當失敗、每次重傳整包 12 MB；而且舊版逾時會「停下整個佇列」，把後面的短筆記也擋了 14 分鐘。→ 前端：小的先傳、逾時依檔案大小放寬（150～480 秒）、單則失敗不擋其他、錯誤訊息直白；失敗過的筆記重試前先問後端 `status`（只送 id）；後端新增 `status` 動作。
+- **不要用 XMLHttpRequest 取上傳進度**：註冊 `xhr.upload` 監聽會讓瀏覽器改送 CORS preflight（OPTIONS），Apps Script 不支援，等於整個壞掉（本機測試抓到）。要維持 `fetch` 不設 Content-Type。
 - **指令碼屬性填反**：曾把 key 填在「屬性」欄 → 左邊是名稱（`TOKEN`），右邊才是值
 - **改了 Code.gs 卻沒生效**：一定要「管理部署作業 → ✏️ → 建立新版本」；不要「新增部署作業」（網址會變）
 - **macOS 不讓 launchd 讀 `~/Library/CloudStorage`**（Operation not permitted）：腳本不能放 OneDrive／Drive 資料夾裡執行；雲端互搬改用 rclone 遠端。使用者另外兩個備份排程也有同樣問題（另開任務處理）
 - **Mac 的 `rm` 是 `trash` 的 alias**；Drive 裡 Apps Script 建的檔案本機刪不掉 → 用 Google Drive 連接器 `trash_file`
 
 ## 待辦／注意
+- [ ] **更新 Apps Script**（2026-11-14 起）：貼上新的 `apps-script/Code.gs`（新增 `status` 動作）→ 管理部署作業 → ✏️ → 建立新版本。沒更新也能用，只是失敗後仍會整包重傳
 - [x] Apps Script 已部署含 `LockService` 的版本（防重複，2026-10-26 使用者確認）
 - [ ] iPad 安裝（Safari → 分享 → 加入主畫面）
 - rclone 的 `gdrive:` 遠端是用 rclone 共用 client_id 建的，2026 年內會失效；目前沒用到（自動搬檔已停用），要重新啟用搬檔時需先建自己的 Google OAuth client_id（https://rclone.org/drive/#making-your-own-client-id）
