@@ -28,6 +28,7 @@
 - **POST 不設 Content-Type**：讓瀏覽器用 text/plain，避開 Apps Script 不支援的 CORS preflight
 - **用 TOKEN 保護**：網址設「所有人」才能從手機直接呼叫，所以靠 TOKEN 擋陌生請求
 - **Gemini 主力 `gemini-3.8-flash`，忙線依序改用 3.6 Flash → 3.5 Flash-Lite → 3.1 Flash-Lite**（2026-10-28 拿掉 2.5 Flash：已不開放新用戶）：轉錄＋整理用 Flash 就夠，Pro 慢又容易碰額度；準確度主要靠 `DICTIONARY`
+- **模型下架查證紀錄（2026-11-19）**：實際用的模型看 Drive 筆記 frontmatter 的 `model:`（11/13 兩則長錄音是 `gemini-3.8-flash`；11/12 一則短筆記是 `gemini-3.6-flash`，代表當時 3.8 忙線、自動退到備用）。官方 [Deprecations](https://ai.google.dev/gemini-api/docs/deprecations) 摘要：3.8／3.6 Flash、3.5 Flash-Lite 沒有公告下架日；3.1 Flash-Lite 最早 2027-05-07 下架，官方建議改用 3.5 Flash-Lite；3.7 Flash 已自動導向 3.8（Google 換代很快）。**限制**：當時雲端 session 連不上 `ai.google.dev`，是從搜尋摘要得知，且日期是「最早可能」，下次請直接開官方頁面確認。Apps Script 指令碼屬性若有填 `GEMINI_MODEL` 會蓋掉程式碼預設值
 - **筆記只留在 Drive，不自動進 vault（方案 B，使用者 2026-10-26 決定）**：不想所有東西都跟 vault 混在一起；需要時請 Claude 從 Drive 讀出來轉過去，或之後在 Drive 另開 vault
 
 ## 踩過的坑
@@ -45,5 +46,6 @@
 ## 待辦／注意
 - [ ] **更新 Apps Script**（2026-11-14 起）：貼上新的 `apps-script/Code.gs`（新增 `status` 動作）→ 管理部署作業 → ✏️ → 建立新版本。沒更新也能用，只是失敗後仍會整包重傳
 - [x] Apps Script 已部署含 `LockService` 的版本（防重複，2026-10-26 使用者確認）
+- [ ] 每 1～2 個月對照一次 [Deprecations](https://ai.google.dev/gemini-api/docs/deprecations)，必要時更新 `DEFAULT_MODEL`／`FALLBACK_MODELS`（上次：2026-11-19）
 - [ ] iPad 安裝（Safari → 分享 → 加入主畫面）
 - rclone 的 `gdrive:` 遠端是用 rclone 共用 client_id 建的，2026 年內會失效；目前沒用到（自動搬檔已停用），要重新啟用搬檔時需先建自己的 Google OAuth client_id（https://rclone.org/drive/#making-your-own-client-id）
